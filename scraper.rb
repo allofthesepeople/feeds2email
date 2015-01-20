@@ -26,12 +26,6 @@ EMAIL_SERVER = ENV['EMAIL_SERVER']
 #-----------------------------------------------------------------------
 
 def handle_item item, feed
-  md5 = Digest::MD5.hexdigest item.to_s
-  if DB.has_key? md5 # Have we seen this already?
-    return
-  end
-  DB[md5] = ''
-
   case feed.feed_type  # Normalise a couple of fields
   when 'rss'
     t = Time.parse item.pubDate.to_s
@@ -52,6 +46,13 @@ def handle_item item, feed
   else
     return
   end
+
+  md5 = Digest::MD5.hexdigest entry[:link]
+  if DB.has_key? md5 # Have we seen this already?
+    return
+  end
+  DB[md5] = ''
+
 
   @new_items << entry
 end
