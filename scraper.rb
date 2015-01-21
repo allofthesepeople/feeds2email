@@ -2,6 +2,7 @@
 
 require 'digest/md5'
 require "gdbm"
+require 'logger'
 require 'open-uri'
 require 'rss'
 require 'net/smtp'
@@ -11,6 +12,9 @@ require 'time'
 #-----------------------------------------------------------------------
 # Setup
 #-----------------------------------------------------------------------
+Dir.mkdir 'logs' unless Dir.exists? 'logs'
+@log = Logger.new('logs/log.txt', 'daily')
+
 filename     = 'feeds.txt'
 
 DB           = GDBM.new('scraped.db')
@@ -48,6 +52,7 @@ def handle_item item, feed
   end
 
   md5 = Digest::MD5.hexdigest entry[:link]
+  @log.debug "md5: #{md5} for #{entry[:link]}"
   if DB.has_key? md5 # Have we seen this already?
     return
   end
@@ -59,7 +64,13 @@ end
 
 
 def get_feed url
+  @log.debug "Opening: #{url}"
   open(url) do |rss|
+    # puts rss.status
+    # puts rss.last_modified
+    # puts rss.meta['etag']
+    # puts rss.meta
+
     feed = RSS::Parser.parse rss, false
 
     feed.items.each do |item|
@@ -97,9 +108,9 @@ end
 #-----------------------------------------------------------------------
 
 # Retrive the the feeds
-File.open(filename, 'r').each_line do |feed|
-  if feed
-    get_feed feed
+File.open(filename, 'r').each_line do |url|
+  if url
+    get_feed url
   end
 end
 
