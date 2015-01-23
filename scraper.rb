@@ -1,7 +1,8 @@
 #!/usr/bin/env ruby
 
 require 'digest/md5'
-require "gdbm"
+# require 'gdbm'
+require 'pstore'
 require 'logger'
 require 'open-uri'
 require 'rss'
@@ -17,7 +18,7 @@ Dir.mkdir 'logs' unless Dir.exists? 'logs'
 
 filename     = 'feeds.txt'
 
-DB           = GDBM.new('scraped.db')
+@db          =  PStore.new('existing.db')
 EMAIL_ADDR   = ENV['EMAIL_ADDRESS']
 EMAIL_PASS   = ENV['EMAIL_PASSCODE']
 EMAIL_DOMAIN = ENV['EMAIL_DOMAIN']
@@ -53,10 +54,13 @@ def handle_item item, feed
 
   md5 = Digest::MD5.hexdigest entry[:link]
   @log.debug "md5: #{md5} for #{entry[:link]}"
-  if DB.has_key? md5 # Have we seen this already?
-    return
+  @db.transaction do
+    return unless @db[md5].nil?  # Have we seen this already?
+
+    @db[md5] = ''
   end
-  DB[md5] = ''
+
+
 
 
   @new_items << entry
@@ -116,5 +120,8 @@ end
 
 # Send an email with anything new
 if @new_items.length > 0
-  send_mail @new_items
+  # send_mail @new_items
+  @new_items.each do |item|
+    puts item[:title]
+  end
 end
