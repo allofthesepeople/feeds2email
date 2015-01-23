@@ -33,6 +33,6 @@ build/
 # unless supporting rvm < 1.11.0 or doing something fancy, ignore this:
 .rvmrc
 
-# Don't add the scraped db, or logs
-scraped.db
+# Don't add any dbs, or logs
+*.db
 logs/
