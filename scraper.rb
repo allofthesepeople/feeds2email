@@ -1,10 +1,9 @@
 #!/usr/bin/env ruby
 
 require 'digest/md5'
-# require 'gdbm'
-require 'pstore'
 require 'logger'
 require 'open-uri'
+require 'pstore'
 require 'rss'
 require 'net/smtp'
 require 'time'
@@ -18,7 +17,7 @@ Dir.mkdir 'logs' unless Dir.exists? 'logs'
 
 filename     = 'feeds.txt'
 
-@db          =  PStore.new('existing.db')
+@db          =  PStore.new('existing.db', thread_safe = true)
 EMAIL_ADDR   = ENV['EMAIL_ADDRESS']
 EMAIL_PASS   = ENV['EMAIL_PASSCODE']
 EMAIL_DOMAIN = ENV['EMAIL_DOMAIN']
@@ -54,14 +53,11 @@ def handle_item item, feed
 
   md5 = Digest::MD5.hexdigest entry[:link]
   @log.debug "md5: #{md5} for #{entry[:link]}"
-  @db.transaction do
-    return unless @db[md5].nil?  # Have we seen this already?
 
+  @db.transaction do
+    return if @db.root? md5  # Have we seen this already?
     @db[md5] = ''
   end
-
-
-
 
   @new_items << entry
 end
@@ -70,13 +66,7 @@ end
 def get_feed url
   @log.debug "Opening: #{url}"
   open(url) do |rss|
-    # puts rss.status
-    # puts rss.last_modified
-    # puts rss.meta['etag']
-    # puts rss.meta
-
     feed = RSS::Parser.parse rss, false
-
     feed.items.each do |item|
       handle_item item, feed
     end
@@ -101,11 +91,13 @@ MESSAGE_END
 
   smtp = Net::SMTP.new EMAIL_SERVER, 587
   smtp.enable_starttls
-  smtp.start(EMAIL_DOMAIN, EMAIL_ADDR, EMAIL_PASS, :login) do
-    smtp.send_message(msg, EMAIL_ADDR, EMAIL_ADDR)
-  end
+  smtp.start(EMAIL_DOMAIN, EMAIL_ADDR, EMAIL_PASS, :login) { smtp.send_message(msg, EMAIL_ADDR, EMAIL_ADDR) }
 end
 
+
+def maybe_add_feed url
+
+end
 
 #-----------------------------------------------------------------------
 # Get things going
@@ -113,14 +105,12 @@ end
 
 # Retrive the the feeds
 File.open(filename, 'r').each_line do |url|
-  if url
-    get_feed url
-  end
+    get_feed url if url
 end
 
 # Send an email with anything new
 if @new_items.length > 0
-  # send_mail @new_items
+  send_mail @new_items
   @new_items.each do |item|
     puts item[:title]
   end
