@@ -7,6 +7,7 @@ require 'pstore'
 require 'rss'
 require 'net/smtp'
 require 'time'
+require 'uri'
 
 
 #-----------------------------------------------------------------------
@@ -24,12 +25,13 @@ EMAIL_PASS    = ENV['EMAIL_PASSCODE']
 EMAIL_DOMAIN  = ENV['EMAIL_DOMAIN']
 EMAIL_SERVER  = ENV['EMAIL_SERVER']
 
-@new_items   = []
+@new_items    = []
+feeds         = []
+
 
 #-----------------------------------------------------------------------
 # Functionality
 #-----------------------------------------------------------------------
-
 def handle_item item, feed
   case feed.feed_type  # Normalise a couple of fields
   when 'rss'
@@ -81,8 +83,15 @@ def get_feed feed
       end
     end
 
-  rescue OpenURI::HTTPError => error
-    @log.debug "#{error.io.status}"
+  rescue => e
+    case e
+    when OpenURI::HTTPError
+      @log.error "#{feed[:url]}:: #{e.io.status}"
+    when SocketError
+      @log.error "#{feed[:url]}:: #{e}"
+    else
+      raise e
+    end
   end
 end
 
@@ -104,7 +113,9 @@ MESSAGE_END
 
   smtp = Net::SMTP.new EMAIL_SERVER, 587
   smtp.enable_starttls
-  smtp.start(EMAIL_DOMAIN, EMAIL_ADDR, EMAIL_PASS, :login) { smtp.send_message(msg, EMAIL_ADDR, EMAIL_ADDR) }
+  smtp.start(EMAIL_DOMAIN, EMAIL_ADDR, EMAIL_PASS, :login) do
+    smtp.send_message(msg, EMAIL_ADDR, EMAIL_ADDR)
+  end
 end
 
 
@@ -114,6 +125,13 @@ end
 
 # First insure the urls in feeds.txt are in the tracking db
 File.open(filename, 'r').each_line do |url|
+  # Test if it’s a valid url first
+  url.strip!
+  unless (url =~ /\A#{URI::regexp(['http', 'https'])}\z/) == 0
+    @log.error "Invalid URL for: #{url}"
+    next
+  end
+
   #get the md5
   md5 = Digest::MD5.hexdigest url
   @db_feeds.transaction do
@@ -130,10 +148,10 @@ end
 
 # Retrive the the feeds
 @db_feeds.transaction do
-  @db_feeds.roots.each do |feed|
-    get_feed @db_feeds[feed]
-  end
+  @db_feeds.roots.each { |feed| feeds << @db_feeds[feed] }
 end
+
+feeds.each { |feed| get_feed feed }
 
 
 # Send an email with anything new
