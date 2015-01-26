@@ -15,13 +15,14 @@ require 'time'
 Dir.mkdir 'logs' unless Dir.exists? 'logs'
 @log = Logger.new('logs/log.txt', 'daily')
 
-filename     = 'feeds.txt'
+filename      = 'feeds.txt'
 
-@db          =  PStore.new('existing.db', thread_safe = true)
-EMAIL_ADDR   = ENV['EMAIL_ADDRESS']
-EMAIL_PASS   = ENV['EMAIL_PASSCODE']
-EMAIL_DOMAIN = ENV['EMAIL_DOMAIN']
-EMAIL_SERVER = ENV['EMAIL_SERVER']
+@db_feeds     = PStore.new('feeds.db', thread_safe = true)
+@db_parsed    = PStore.new('parsed.db', thread_safe = true)
+EMAIL_ADDR    = ENV['EMAIL_ADDRESS']
+EMAIL_PASS    = ENV['EMAIL_PASSCODE']
+EMAIL_DOMAIN  = ENV['EMAIL_DOMAIN']
+EMAIL_SERVER  = ENV['EMAIL_SERVER']
 
 @new_items   = []
 
@@ -54,22 +55,34 @@ def handle_item item, feed
   md5 = Digest::MD5.hexdigest entry[:link]
   @log.debug "md5: #{md5} for #{entry[:link]}"
 
-  @db.transaction do
-    return if @db.root? md5  # Have we seen this already?
-    @db[md5] = ''
+  @db_parsed.transaction do
+    return if @db_parsed.root? md5  # Have we seen this already?
+    @db_parsed[md5] = ''
   end
 
   @new_items << entry
 end
 
 
-def get_feed url
-  @log.debug "Opening: #{url}"
-  open(url) do |rss|
-    feed = RSS::Parser.parse rss, false
-    feed.items.each do |item|
-      handle_item item, feed
+def get_feed feed
+  @log.debug "Opening: #{feed[:url]}"
+  begin
+    open(feed[:url],
+         "If-None-Match" => feed[:etag],
+         "If-Modified-Since" => feed[:last_modified].rfc2822) do |rss|
+
+      feed[:etag]         = rss.meta['etag'].to_s
+      feed[:last_checked] = Time.now
+
+      @db_parsed.transaction {@db_parsed[feed[:md5] = feed]}
+      parsed = RSS::Parser.parse rss, false
+      parsed.items.each do |item|
+        handle_item item, parsed
+      end
     end
+
+  rescue OpenURI::HTTPError => error
+    @log.debug "#{error.io.status}"
   end
 end
 
@@ -95,18 +108,33 @@ MESSAGE_END
 end
 
 
-def maybe_add_feed url
-
-end
-
 #-----------------------------------------------------------------------
 # Get things going
 #-----------------------------------------------------------------------
 
-# Retrive the the feeds
+# First insure the urls in feeds.txt are in the tracking db
 File.open(filename, 'r').each_line do |url|
-    get_feed url if url
+  #get the md5
+  md5 = Digest::MD5.hexdigest url
+  @db_feeds.transaction do
+    next if @db_feeds.root? md5
+
+    @db_feeds[md5] = {:url => url.strip,
+                      :md5 => md5,
+                      :etag => '',
+                      :last_modified => Time.new(2014)}
+  end
+  # TODO: Check any feeds have not been removed (or rather, remove any
+  #       that have)
 end
+
+# Retrive the the feeds
+@db_feeds.transaction do
+  @db_feeds.roots.each do |feed|
+    get_feed @db_feeds[feed]
+  end
+end
+
 
 # Send an email with anything new
 if @new_items.length > 0
